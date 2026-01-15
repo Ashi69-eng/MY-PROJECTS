@@ -1,0 +1,242 @@
+import java.io.*;
+
+class User {
+    String username;
+    String pin;
+    float balance;
+    String[] transactionHistory = new String[5];
+    int historyCount = 0;
+
+    int loginAttempts = 0;
+    boolean isLocked = false;
+
+    public User(String username, String pin, float balance) {
+        this.username = username;
+        this.pin = pin;
+        this.balance = balance;
+    }
+
+    public boolean validatePin(String inputPin) {
+        return this.pin.equals(inputPin);
+    }
+
+    public boolean isAccountLocked() {
+        return isLocked;
+    }
+
+    public void recordFailedAttempt() {
+        loginAttempts++;
+        if (loginAttempts >= 3) {
+            isLocked = true;
+        }
+    }
+
+    public void resetLoginAttempts() {
+        loginAttempts = 0;
+        isLocked = false;
+    }
+
+    public synchronized void deposit(float amount) {
+        balance += amount;
+        System.out.printf("Deposited %.2f. New Balance: %.2f\n", amount, balance);
+        addToHistory(String.format("Deposited: %.2f", amount));
+    }
+
+    public synchronized void withdraw(float amount) {
+        if (balance >= amount) {
+            balance -= amount;
+            System.out.printf("Withdrew %.2f. New Balance: %.2f\n", amount, balance);
+            addToHistory(String.format("Withdrew: %.2f", amount));
+        } else {
+            System.out.println("Insufficient funds.");
+        }
+    }
+
+    public synchronized void balanceInquiry() {
+        System.out.printf("Your balance is: %.2f\n", balance);
+    }
+
+    public synchronized boolean changePin(BufferedReader reader) throws IOException {
+        System.out.print("Enter your old PIN: ");
+        String oldPin = reader.readLine();
+
+        if (validatePin(oldPin)) {
+            System.out.print("Enter new PIN: ");
+            String newPin = reader.readLine();
+            this.pin = newPin;
+            resetLoginAttempts(); // unlock account after successful PIN change
+            System.out.println("PIN changed and account unlocked successfully.");
+            return true;
+        } else {
+            System.out.println("Incorrect old PIN.");
+            return false;
+        }
+    }
+
+    public synchronized void miniStatement() {
+        System.out.println("\nMini Statement:");
+        int count = Math.min(historyCount, 5);
+        for (int i = 0; i < count; i++) {
+            System.out.println(transactionHistory[i]);
+        }
+    }
+
+    private void addToHistory(String entry) {
+        transactionHistory[historyCount % 5] = entry;
+        historyCount++;
+    }
+}
+
+class ATM implements Runnable {
+    private User user;
+    private BufferedReader reader;
+
+    public ATM(User user, BufferedReader reader) {
+        this.user = user;
+        this.reader = reader;
+    }
+
+    public void run() {
+        try {
+            atmMenu();
+        } catch (IOException e) {
+            System.out.println("I/O error occurred. Exiting ATM session.");
+        }
+    }
+
+    public void atmMenu() throws IOException {
+        while (true) {
+            System.out.println("\nATM Menu:");
+            System.out.println("1. Deposit");
+            System.out.println("2. Withdraw");
+            System.out.println("3. Balance Inquiry");
+            System.out.println("4. Mini Statement");
+            System.out.println("5. Change PIN");
+            System.out.println("6. Logout");
+            System.out.print("Enter your choice: ");
+
+            String input = reader.readLine();
+            int choice;
+
+            try {
+                choice = Integer.parseInt(input);
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a number.");
+                continue;
+            }
+
+            switch (choice) {
+                case 1:
+                    System.out.print("Enter amount to deposit: ");
+                    try {
+                        float amount = Float.parseFloat(reader.readLine());
+                        user.deposit(amount);
+                    } catch (NumberFormatException e) {
+                        System.out.println("Invalid amount.");
+                    }
+                    break;
+                case 2:
+                    System.out.print("Enter amount to withdraw: ");
+                    try {
+                        float amount = Float.parseFloat(reader.readLine());
+                        user.withdraw(amount);
+                    } catch (NumberFormatException e) {
+                        System.out.println("Invalid amount.");
+                    }
+                    break;
+                case 3:
+                    user.balanceInquiry();
+                    break;
+                case 4:
+                    user.miniStatement();
+                    break;
+                case 5:
+                    user.changePin(reader);
+                    break;
+                case 6:
+                    System.out.println("Logging out...");
+                    return;
+                default:
+                    System.out.println("Invalid choice. Try again.");
+            }
+        }
+    }
+}
+
+public class ATMSystem {
+    static User[] users = {
+        new User("user1", "1234", 10000),
+        new User("user2", "5678", 3000)
+    };
+
+    public static void main(String[] args) {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+
+        System.out.println("Welcome to ATM System");
+
+        try {
+            while (true) {
+                User loggedInUser = null;
+
+                System.out.print("Enter username (or 'exit' to quit): ");
+                String username = reader.readLine();
+
+                if (username.equalsIgnoreCase("exit")) {
+                    System.out.println("Goodbye!");
+                    break;
+                }
+
+                boolean found = false;
+
+                for (User user : users) {
+                    if (user.username.equals(username)) {
+                        found = true;
+
+                        if (user.isAccountLocked()) {
+                            System.out.println("This account is locked due to too many failed login attempts.");
+                            System.out.print("Do you want to try unlocking it by changing the PIN? (yes/no): ");
+                            String choice = reader.readLine();
+                            if (choice.equalsIgnoreCase("yes")) {
+                                if (user.changePin(reader)) {
+                                    loggedInUser = user;
+                                }
+                            }
+                            break;
+                        }
+
+                        System.out.print("Enter PIN: ");
+                        String pin = reader.readLine();
+
+                        if (user.validatePin(pin)) {
+                            user.resetLoginAttempts(); // reset after successful login
+                            loggedInUser = user;
+                            break;
+                        } else {
+                            user.recordFailedAttempt();
+                            if (user.isAccountLocked()) {
+                                System.out.println("Incorrect PIN. Account has been locked.");
+                            } else {
+                                System.out.println("Incorrect PIN. Attempts left: " + (3 - user.loginAttempts));
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (!found) {
+                    System.out.println("User not found.");
+                } else if (loggedInUser != null) {
+                    System.out.println("Login successful.");
+                    Thread sessionThread = new Thread(new ATM(loggedInUser, reader));
+                    sessionThread.start();
+                    sessionThread.join(); // Wait for logout
+                    System.out.println("Session ended. Returning to login screen...\n");
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("An I/O error occurred. Exiting.");
+        } catch (InterruptedException e) {
+            System.out.println("ATM session was interrupted.");
+        }
+    }
+}
